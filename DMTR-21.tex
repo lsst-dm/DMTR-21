@@ -938,7 +938,7 @@ Qserv SVN r21589, MySQL 5.1.45 and XRootD
 \subsection{Data}\label{data}
 
 We tested using a dataset synthesized by spatially replicating the
-dataset from the LSST data challenge (``PT1.1'', \citet{Document-26217}). We used two tables:
+dataset from the LSST data challenge (``PT1.1'', \citeds{Document-26217}). We used two tables:
 Object and Source.\footnote{The schema may be browsed online at
   \url{https://ls.st/8g4}} These
 two tables are among the largest expected in LSST. Of these two, the
@@ -1489,7 +1489,7 @@ Qserv master process. We therefore changed to a unified query dispatch
 and result reader thread pool model.
 
 To test our ability to handle many concurrent full-table scan queries
-without running out of threads, we partitioned the PT1.2 Object table
+without running out of threads, we partitioned the PT1.2 \citedsp{Document-9044} Object table
 into \textasciitilde{}8,000 chunks, and distributed them across an 80
 node cluster at SLAC. The nodes in this cluster were quite old and had
 limited quantities of RAM, making them the perfect workhorses for this
