@@ -103,7 +103,7 @@ We have run several large scale tests
   nodes, each node: two Intel Xeon 2.4 GHz GPUs with 4 GB RAM and 1
   local hard disk of 80 Gbs)
 \item
-  (2010) several 100-node tests run at SLAC \citep{slac-test}. These tests helped
+  (2010) several 100-node tests run at SLAC. These tests helped
   us uncover many bottlenecks and prompted rewriting parts of our
   software, as well as implementing several missing features in
   XRootD.
@@ -127,11 +127,807 @@ We have run several large scale tests
   (08/2013) A demonstration of shared scans.
 \end{enumerate}
 
-The tests 3-5 listed above are described in further details below, with test 6 documented in \citeds{DMTR-12}.
+The tests 2-5 listed above are described in further details below, with test 6 documented in \citeds{DMTR-12}.
+
+\section{Phase II Qserv Testing (up to 100
+nodes)}\label{phase-ii-qserv-testing-up-to-100-nodes}
+
+This section describes the earliest testing of Qserv, during 2010, on LSST-derived data.
+Earlier testing used the
+\href{http://www.nofs.navy.mil/data/fchpix/}{USNO-B data set}, which was
+not representative of the shape of expected LSST data, although it
+represented real measurements on the sky.
+
+\subsection{ir2farm testing}\label{ir2farm-testing}
+
+\subsubsection{Hardware}\label{hardware-ir2farm}
+
+We have been granted use (since September 2010) of 40 nodes of a cluster
+at SLAC called ir2farm. Its main purpose is to support
+\href{http://www.slac.stanford.edu/BF/}{BaBar} data processing, and our
+access will be temporary.
+
+\paragraph{Node configuration}\label{node-configuration}
+
+\begin{itemize}
+\item
+  SUN X4100 server
+\item
+  CPU: Dual Opteron 275 processors (4 cores total), 2.2GHz, 1x1MB L2
+  cache
+\item
+  Memory: 4GB
+\item
+  HD: 1 per machine for testing. binaries + data on same disk.
+
+  \begin{itemize}
+  \item
+    Disk details: 73.5GB FUJITSU MAY2073RCSUN72G 10k SAS drive
+  \item
+    Fujitsu MAY2073RC series, 2.5", 73.5GB, 8MB buffer, SAS (300MBps
+    interface)
+  \item
+    Seek Time: 4 ms (average) / 8 ms (max)
+  \item
+    Track-to-Track Seek Time 0.2 ms
+  \item
+    Average Latency 2.99 ms
+  \item
+    Spindle Speed 10000 rpm
+  \item
+    Mean time before failure 1,400,000 hour(s)
+  \item
+    Storage Hard Drive / Non-Recoverable Errors 1 per 10$^15$
+  \item
+    Seek Errors 10 per 10$^8$
+  \item
+    1Gbit ethernet, iperf: 944MBits/sec using default 16K TCP window
+  \end{itemize}
+\end{itemize}
+
+\paragraph{OS/software/cluster
+configuration}\label{ossoftwarecluster-configuration}
+
+\begin{itemize}
+\item
+  RHEL 5.5 Linux
+\item
+  2.6.18 series kernel
+\item
+  gcc 4.1.2
+\item
+  Python 2.5.2 (from LSST stack)
+\item
+  MySQL server 5.1.45 (default tunings from source distrib)
+\item
+  MySQL client 5.0.45, python 1.2.2 (LSST stack)
+\item
+  antlr 2.7.7
+\item
+  Twisted 9.0.0
+\item
+  boost 1.42.0
+\item
+  swig 1.3.36+2 (LSST stack\_)
+\item
+  tcltk 8.5a4
+\item
+  scons 2.0.1
+\item
+  Development version of xrootd/scalla (inc. changes not yet ported back
+  to trunk)
+\end{itemize}
+
+\begin{itemize}
+\item
+  Using 39 of 40 nodes, one had a faulty disk at time of installation,
+  and we have not redistributed data since it got fixed.
+\item
+  1 Master, 38 worker.
+\item
+  Master: xrootd/cmsd in manager mode, qserv-master, MySQL
+  result/aggregation/metadata db, mysql-proxy
+\item
+  Worker: xrootd/cmsd in server mode, qserv-worker as ofs plugin, MySQL
+  partitioned dbs.
+\end{itemize}
+
+\paragraph{Data configuration}\label{data-configuration}
+
+Using duplicated PT1 data.
+
+\begin{itemize}
+\item
+  PT1 Object data, 33 copies in RA, 17 copies in declination
+
+\begin{verbatim}
+#!/bin/sh
+fpath=orig
+opath=.
+tname=Object
+# total is seq 0 140
+for i in `seq 0 9`; do
+beg=`expr $i \* 4`
+end=`expr $beg + 4`
+echo "beg $beg end $end"
+  python duplicatePT1.py --schema $fpath/$tname.sql \
+    --delim=, \
+    --raCopies=33 --declCopies=17 \
+    --start=$beg --end=$end \
+    --box=-5.25,-4.4,5.25,4.75 \
+    --outPrefix=$opath/$tname \
+    $fpath/$tname.txt
+done
+\end{verbatim}
+
+\item
+  Partitioned using fixed partitions. 60 stripes, 18 substripes.
+
+\begin{verbatim}
+./lsstpy.sh partition.py -v -t 2 -p 4 -S 60 -s 18 -P Object -O objOutput $ipath/Object$i
+\end{verbatim}
+
+\item
+  2001 chunks total.
+\end{itemize}
+
+\subsubsection{Initial testing}\label{initial-testing}
+
+Performed using trunk SVN r17580
+
+\begin{itemize}
+\item
+  full-sky row count:
+
+\begin{verbatim}
+   SELECT COUNT(*) FROM Object;
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    1m 50s
+  \end{itemize}
+\item
+  Column query, full-sky:
+
+\begin{verbatim}
+   SELECT COUNT(*) FROM LSST.Object WHERE gFlux_PS>3000;
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    25 min 3.32 sec
+  \end{itemize}
+\item
+  1 sq degree count query:
+
+\begin{verbatim}
+   SELECT COUNT(*) FROM LSST.Object WHERE qserv_areaspec_box(6,6,7,7) AND
+   ra_PS BETWEEN 6 AND 7 AND decl_PS BETWEEN 6 AND 7;
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    13.42 sec
+  \end{itemize}
+\item
+  Full table scan aggregation:
+
+\begin{verbatim}
+   SELECT AVG(ra_PS) FROM Object;
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    25m 2s
+  \item
+    Effective bandwidth:
+
+    \begin{itemize}
+    \item
+      1+38 nodes
+    \item
+      1.47B rows * 1015 bytes/row =\textasciitilde{}1.5 Billion bytes
+    \item
+      Bandwidth: 995MB/sec, or 26MB/sec for each disk (raw bandwidth(via
+      dd) 55.9MB/sec)
+    \end{itemize}
+  \end{itemize}
+\item
+  Spatially-restricted selection (smaller):
+
+\begin{verbatim}
+   select count(*) from LSST.Object where qserv_areaspec_box(5,5,6,6);
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    (count(*)=0)
+  \item
+    25 min 5.09 sec
+  \item
+    Using qserv r18134 with spatial UDF
+  \item
+    with box:6.5,6.5,7.1,7.1: 11.13 sec, count=17151, 1 chunk
+  \end{itemize}
+\item
+  Spatially-restricted selection (bigger):
+
+\begin{verbatim}
+   select count(*) from LSST.Object where qserv_areaspec_box(1,1,6,6);
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    (count(*) = 590978
+  \item
+    25 min 6.52 sec
+  \item
+    Using r18134 with spatial UDF processing
+  \item
+    1994 chunks touched.
+  \end{itemize}
+\item
+  Spatially-restricted selection (small: 0.25 sq deg):
+
+\begin{verbatim}
+   select count(*) from LSST.Object where qserv_areaspec_box(5.5,5.5,6,6);
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    (count(*) = 0
+  \item
+    12.52 sec
+  \item
+    Using r18134 with spatial UDF processing
+  \item
+    2 chunks touched.
+  \end{itemize}
+\item
+  Near-neighbor over 9 sq deg
+
+\begin{verbatim}
+   select count(*) from LSST.Object o1, LSST.Object o2 where qserv_areaspec_box(-1,-1,2,2)
+   and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
+\end{verbatim}
+
+  \begin{itemize}
+  \item
+    (count(*) = 395606096 )
+  \item
+    6m 18.32s; 6m 7.63s
+  \item
+    4 chunks touched.
+  \end{itemize}
+\end{itemize}
+
+\subsubsection{Further 38+1 node testing with
+r18694}\label{further-381-node-testing-with-r18694}
+
+\begin{itemize}
+\item
+  Simple count query
+
+\begin{verbatim}
+mysql> select count(*) from Object;
+\end{verbatim}
+
+Times: 9:56.84, 45.42, 44.61 \textasciitilde{}10 minute execution for
+the first time illustrates cold-start: the framework incurs overhead in
+determining chunk-node mappings and can cache them for future access.
+
+\item
+  Near-neighbor over 100 sq degrees
+
+\begin{verbatim}
+mysql> select count(*) from LSST.Object o1, LSST.Object o2
+       where qserv_areaspec_box(-11,-11,-1,-1)
+       and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
++------------+
+| count(*)   |
++------------+
+| 8261246957 |
++------------+
+1 row in set (41 min 54.28 sec)
+\end{verbatim}
+
+Note: there are 4,373,646 rows in this box, spread over 16 chunks.
+
+\item
+  Concurrent near neighbor queries. 2 x 100 sq deg
+
+\begin{verbatim}
+mysql> select count(*) from LSST.Object o1, LSST.Object o2
+where qserv_areaspec_box(-11.1,-11.1,-1.1,-1.1)
+and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
++------------+
+| count(*)   |
++------------+
+| 8136886173 |
++------------+
+1 row in set (51 min 8.50 sec)
+\end{verbatim}
+
+\begin{verbatim}
+mysql> select count(*) from LSST.Object o1, LSST.Object o2
+where qserv_areaspec_box(2,-11,12,-1)
+and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
++------------+
+| count(*)   |
++------------+
+| 7763722919 |
++------------+
+1 row in set (36 min 41.26 sec)
+\end{verbatim}
+
+\item
+  COUNT(*) is running about 30s when things are cached. This sounds a
+  little slow. With 2000 active chunks, this is about 66 chunkqueries
+  per second. Each chunkquery has a lot of logistical steps: query
+  generation, node lookup (network), open-writequery-close (network),
+  open-readresults-close (network), write dump file, read dump file,
+  transfer dump file, write dump file, read dump file into mysql, merge
+  results into final result table. This is addition to the actual
+  subquery execution. Still, it should be possible to be faster. Might
+  be time for some microbenchmarks.
+\end{itemize}
+
+\subsubsection{38+1 using r19068}\label{using-r19068}
+
+\begin{itemize}
+\item
+  COUNT(*) is now running with \textasciitilde{}12s latency. Should be
+  able to reduce further by not buffering results on frontend (necessary
+  to handle large results, i.e., for objectId index).
+\end{itemize}
+
+\subsection{Scalability testing}\label{scalability-testing}
+
+\subsubsection{Using ir2farm 38+1
+configuration}\label{using-ir2farm-381-configuration}
+
+\paragraph{Test harness at 5 nodes}\label{test-harness-at-5-nodes}
+
+Tested with only 5 nodes, same data density (approximately) as 38 node
+cfg. Test out sample queries. Actual benchmark queries will modulate the
+numbers in the where clause to prevent query result caching.
+
+\begin{itemize}
+\item
+  Stream 1:
+
+\begin{verbatim}
+mysql> select avg(uFlux_PS),avg(uFlux_PS_Sigma) from Object;
++------------------+---------------------+
+| avg(uFlux_PS)    | avg(uFlux_PS_Sigma) |
++------------------+---------------------+
+| 3538.14419765824 |    120.888001608003 |
++------------------+---------------------+
+1 row in set (29 min 9.21 sec)
+
+mysql> select avg(uFlux_PS),avg(uFlux_PS_Sigma) from Object where latestObsTime > 49654.19329;
++------------------+---------------------+
+| avg(uFlux_PS)    | avg(uFlux_PS_Sigma) |
++------------------+---------------------+
+| 2431.19667946996 |    98.6096359211597 |
++------------------+---------------------+
+1 row in set (25 min 41.61 sec)
+\end{verbatim}
+
+\item
+  Stream 2:
+
+\begin{verbatim}
+mysql> select avg(uFlux_PS),avg(uFlux_PS_Sigma) from Object;
++------------------+---------------------+
+| avg(uFlux_PS)    | avg(uFlux_PS_Sigma) |
++------------------+---------------------+
+| 3538.14419765824 |    120.888001608003 |
++------------------+---------------------+
+1 row in set (18 min 32.53 sec)
+
+mysql> select avg(uFlux_PS),avg(uFlux_PS_Sigma) from Object where earliestObsTime <49571.375337;
++------------------+---------------------+
+| avg(uFlux_PS)    | avg(uFlux_PS_Sigma) |
++------------------+---------------------+
+| 4003.46130769641 |    129.511811500079 |
++------------------+---------------------+
+1 row in set (29 min 22.81 sec)
+\end{verbatim}
+
+\item
+  Single query:
+
+\begin{verbatim}
+mysql> select avg(uFlux_PS),avg(uFlux_PS_Sigma) from Object where earliestObsTime <49571.375338;
++------------------+---------------------+
+| avg(uFlux_PS)    | avg(uFlux_PS_Sigma) |
++------------------+---------------------+
+| 3933.44004534094 |    128.243156312967 |
++------------------+---------------------+
+1 row in set (14 min 34.65 sec)
+\end{verbatim}
+
+The single (non-concurrent) query is faster, as expected. It is a
+full-table scan query, so unless scans are shared, two simultaneous
+full-scans are expected to take roughly twice as long.
+\end{itemize}
+
+\subsection{boer testing}\label{boer-testing}
+
+\subsubsection{Introduction}\label{introduction}
+
+During 12/2010, we have obtained temporary access to the boer cluster at
+SLAC. We have access to boer0021-boer0122 (where boer0042 is a dead
+node), which gives us 101 nodes.
+
+\subsubsection{Hardware}\label{hardware-boer}
+
+The boer cluster consists of
+
+\begin{itemize}
+\item
+  SUN X2200 M2 servers
+\item
+  CPU: Dual Opteron 2218 processors (4 cores total), 2.613GHz, 1x1MB L2
+  cache per core
+\item
+  Memory: 8GB
+\item
+  System disk: binaries
+
+  \begin{itemize}
+  \item
+    SATA 3.0Gbps configured as UDMA/133
+  \item
+    Seagate ST32500N
+  \item
+    SEAGATE ST32500NSSUN250G 0732B4ES5H, 3.AZK, max UDMA/133
+  \item
+    250GB
+  \end{itemize}
+\end{itemize}
+
+\begin{itemize}
+\item
+  Data disk: mysql tables
+
+  \begin{itemize}
+  \item
+    Hitachi HDS7225S Rev: V5DO
+  \item
+    HDS7225SCSUN250G
+  \item
+    250GB
+  \end{itemize}
+\end{itemize}
+
+Other configuration/settings seem to be the same as for ir2farm.
+
+\subsubsection{Software}\label{software}
+
+We have configured the software identically as for ir2farm, with the
+exception of using updated qserv software.
+
+\subsubsection{Configuration}\label{configuration}
+
+We have setup the cluster with one ``head node'' and 100 ``worker''
+nodes. The head node runs: mysqlproxy, mysqld, qserv frontend,
+xrootd/cmsd(manager), xrootd/cmsd(supervisor). Each worker node runs:
+mysqld, xrootd/cmsd(server+libqserv\_worker).
+
+\subsubsection{Initial Results}\label{initial-results}
+
+using trunk r18510
+
+\begin{itemize}
+\item
+  Full-sky object count:
+
+\begin{verbatim}
+select count(*) from Object;
+\end{verbatim}
+
+Example result:
+
+\begin{verbatim}
++------------+
+| count(*)   |
++------------+
+| 1546902522 |
++------------+
+1 row in set (3 min 18.60 sec)
+\end{verbatim}
+
+\texttt{~Times:~3m~18.60s,~20.48s,~20.47s,~20.43s}
+
+Note the first execution of the query is slow, since it was issued after
+restarting the manager. After the manager restarts, it must rebuild its
+cache of chunk-\textgreater{}server mappings. Each mapping is resolved
+via a broadcast message requesting servers that ``own'' a chunk. Since
+we are running in manager+supervisor mode (for 65-127 nodes), this takes
+one additional network hop for each lookup resolution. Note that only
+one additional hop is incurred for configurations between 65-4096 nodes.
+
+\item
+  1.2x1.2 degree square selection
+
+\begin{verbatim}
+mysql> select count(*) from Object WHERE qserv_areaspec_box(0,0,1.2,1.2);
++----------+
+| count(*) |
++----------+
+|    27508 |
++----------+
+1 row in set (1.38 sec)
+\end{verbatim}
+
+\item
+  1 sq deg selection
+
+\begin{verbatim}
+mysql> select count(*) from Object WHERE qserv_areaspec_box(-2,-2,-1,-1);
++----------+
+| count(*) |
++----------+
+|    47336 |
++----------+
+1 row in set (2.84 sec)
+\end{verbatim}
+
+\item
+  1/4 sq deg selection
+
+\begin{verbatim}
+mysql> select count(*) from Object WHERE qserv_areaspec_box(-2,-2,-1.5,-1.5);
++----------+
+| count(*) |
++----------+
+|    16285 |
++----------+
+1 row in set (1.44 sec)
+\end{verbatim}
+
+\item
+  0.04 sq deg selection
+
+\begin{verbatim}
+mysql> select count(*) from Object WHERE qserv_areaspec_box(-2,-2,-1.8,-1.8);
++----------+
+| count(*) |
++----------+
+|     2754 |
++----------+
+1 row in set (1.42 sec)
+\end{verbatim}
+
+\item
+  column-bounded 0.01 sq deg selection
+
+\begin{verbatim}
+mysql> select count(*) from Object WHERE qserv_areaspec_box(-2,-2,-1.9,-1.9) AND uFlux_PS > 0;
++----------+
+| count(*) |
++----------+
+|        0 |
++----------+
+1 row in set (1.43 sec)
+\end{verbatim}
+
+Note that uFlux\_PS is NULL in this patch of the sky for these
+objects-\/- we only have rFlux\_PS for them.
+
+\begin{verbatim}
+mysql> select max(uFlux_PS) from Object WHERE qserv_areaspec_box(-2,-2,-1.9,-1.9);
++---------------+
+| max(uFlux_PS) |
++---------------+
+|          NULL |
++---------------+
+1 row in set (1.42 sec)
+\end{verbatim}
+
+\item
+  full-sky average:
+
+\begin{verbatim}
+mysql> select avg(uFlux_PS) from Object where uFlux_PS > 0;
++------------------+
+| avg(uFlux_PS)    |
++------------------+
+| 3526.44353629347 |
++------------------+
+1 row in set (19 min 11.33 sec)
+\end{verbatim}
+\end{itemize}
+
+\paragraph{Using r18512}\label{using-r18512}
+
+Switched to synchronous dispatch to reduce thread thrashing
+
+\begin{verbatim}
+mysql> select avg(uFlux_PS) from Object where uFlux_PS > 0;
++------------------+
+| avg(uFlux_PS)    |
++------------------+
+| 3526.44353629347 |
++------------------+
+1 row in set (14 min 11.17 sec)
+\end{verbatim}
+
+\paragraph{Using r18530}\label{using-r18530}
+
+\begin{quote}
+The frontend code was changed to reduce thread contention. Dispatching within a query is now serial, and result processing is limited in parallelism. This mitigates file-handle and thread crowding. Throughput increases, except that cold start effects are more severe since the chunk lookups are now serial (they are tied to dispatching).
+\end{quote}
+
+In the results below, the cold start effects are strongly apparent in
+the first query execution. However, once the lookups are cached, the
+resulting execution parallelism is much higher.
+
+\begin{verbatim}
+mysql> select avg(uFlux_PS) from Object where uFlux_PS > 0;
++------------------+
+| avg(uFlux_PS)    |
++------------------+
+| 3526.44353629347 |
++------------------+
+1 row in set (22 min 50.89 sec)
+
+mysql> select avg(uFlux_PS) from Object where uFlux_PS > 0;
++------------------+
+| avg(uFlux_PS)    |
++------------------+
+| 3526.44353629347 |
++------------------+
+1 row in set (10 min 35.80 sec)
+
+mysql> select avg(uFlux_PS) from Object where uFlux_PS > 0;
++------------------+
+| avg(uFlux_PS)    |
++------------------+
+| 3526.44353629347 |
++------------------+
+1 row in set (10 min 35.47 sec)
+\end{verbatim}
+
+We are testing a tool that warms up the lookup cache by pre-requesting
+location in parallel in advance of real queries. The bottleneck is a
+large chunk (28GB w/o indexes or overlap on disk) which takes 150+
+seconds after all other chunks have completed. This chunk alone is
+responsible for increasing exec time beyond 8 minutes. Below 7 minutes
+should be possible with good balancing. MySQL tuning should improve
+things further, since anecdotal measurement shows an underutilization of
+disk bandwidth.
+
+\begin{itemize}
+\item
+  Full sky object count
+
+\begin{verbatim}
+   SELECT COUNT(*) FROM Object;
+\end{verbatim}
+
+18m 10.62s; 9.31s ; 19.53s; 20.31s
+
+\item
+  Column-restricted full-sky count
+
+\begin{verbatim}
+   SELECT COUNT(*) FROM LSST.Object WHERE gFlux_PS>3000;
+\end{verbatim}
+
+10 min 35.09 sec
+
+\item
+  Full-sky average aggregation
+
+\begin{verbatim}
+   SELECT AVG(ra_PS) FROM Object;
+\end{verbatim}
+
+10m 35.05s
+
+\item
+  Small 1 sq deg selection
+
+\begin{verbatim}
+   select count(*) from LSST.Object where qserv_areaspec_box(-6,-6,-5,-5);
+\end{verbatim}
+
+8.41sec
+
+\item
+  Larger 25 sq deg selection
+
+\begin{verbatim}
+   select count(*) from LSST.Object where qserv_areaspec_box(-5,-5,0,0);
+\end{verbatim}
+
+8.1sec
+
+\begin{verbatim}
+   select count(*) from LSST.Object where qserv_areaspec_box(1,1,6,6);
+\end{verbatim}
+
+7.61 sec
+
+\item
+  Small near-neighbor selection 9 sq deg
+
+\begin{verbatim}
+ select count(*) from LSST.Object o1, LSST.Object o2 where qserv_areaspec_box(-1,-1,2,2)
+ and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
+\end{verbatim}
+
+4m 32.50s ; 4 min 16.51 sec
+
+\item
+  Medium near-neighbor selection 100 sq deg (2 concurrent N\^{}2\^{}
+  queries)
+
+\begin{verbatim}
+select count(*) from LSST.Object o1, LSST.Object o2
+where qserv_areaspec_box(-11,-11,-1,-1)
+and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
+\end{verbatim}
+
+\begin{verbatim}
+select count(*) from LSST.Object o1, LSST.Object o2
+where qserv_areaspec_box(2,-11,12,1)
+and qserv_angSep(o1.ra_PS,o1.decl_PS, o2.ra_PS, o2.decl_PS) < 0.1;
+\end{verbatim}
+
+These queries failed to complete due to a misconfiguration on a few of
+the nodes, and there was not enough time to fix and re-run. They were
+expected to have running times proportional to their covered area, and
+to not impede each other's performance since they should be parallelized
+among different nodes.
+\end{itemize}
+
+\subsection{Notes}\label{notes}
+
+\begin{itemize}
+\item
+  2010/12/15: We do not (currently) support (properly) queries of the
+  form:
+
+\begin{verbatim}
+SELECT SUM(A) FROM Foo GROUP BY B;
+\end{verbatim}
+
+  since the query rewriter does not add B to the requested columns in
+  the subqueries. Thus the final merged aggregation fails because no B
+  exists to perform GROUP BY.
+\end{itemize}
+
+\begin{itemize}
+\item
+  2010/11/30: Notice that a spatially-restricted selection takes about
+  as long as a full table scan. This implies that it takes about 25
+  minutes to scan a single chunk. There are no indexes on RA and Decl,
+  but with UDFs performing spatial restriction, MySQL would have been
+  unable to leverage them. This argues that we should perform some
+  optimization.
+
+  \begin{itemize}
+  \item
+    Approach 1: subChunkId clause injection -- subChunkId \emph{IS} indexed,
+    so we should add something like ``subChunkId IN (1,2,3,5,25,100)''
+    in the WHERE clause. This should drastically improve performance,
+    but is more complex.
+  \item
+    Approach 2: Add ra/decl indexes -- This might be desired anyway,
+    but we need to add ra/decl clauses that MySQL understands so that it
+    can leverage the indexes.
+  \end{itemize}
+\end{itemize}
+
 
 \section{150-node Scalability Test}\label{node-scalability-test}
 
-\subsection{Hardware}\label{hardware}
+\subsection{Hardware}\label{hardware-150}
 
 We configured a cluster of 150 nodes interconnected via gigabit
 Ethernet. Each node had 2 quad-core Intel Xeon X5355 processors with
